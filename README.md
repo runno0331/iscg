@@ -10,4 +10,4 @@
 - 有理ベジェ曲線
 - 3次Catmull-romスプライン曲線
 
-[URL]:https://cg-basic-assignment1.glitch.me/
+[URL]: https://cg-basic-assignment1.glitch.me/
