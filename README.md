@@ -10,6 +10,6 @@
 - 有理ベジェ曲線
 - 3次Catmull-romスプライン曲線
 
-[ページURL]: https://cg-basic-assignment1.glitch.me/
+[ページURL](https://cg-basic-assignment1.glitch.me/)
 
 
