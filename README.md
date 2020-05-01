@@ -5,8 +5,8 @@
 ## M1パラメトリック曲線の描画
 
 ### 実装したもの:
-    - n次ベジェ曲線
-    - 制御点の追加・削除
-    - 有理ベジェ曲線
-    - 3次Catmull-romスプライン曲線
-    []:https://cg-basic-assignment1.glitch.me/
+- n次ベジェ曲線
+- 制御点の追加・削除
+- 有理ベジェ曲線
+- 3次Catmull-romスプライン曲線
+[URL]:https://cg-basic-assignment1.glitch.me/
