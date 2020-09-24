@@ -1,0 +1,408 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title id="title">[utokyo-iscg-2020] Basic Assignment I1 (Image filtering)</title>
+<script type="text/javascript">
+var canvas = document.createElement("canvas");
+var context = canvas.getContext("2d");
+function smooth_gaussian(width, height, original, smoothed, sigma) {
+    var r = Math.ceil(sigma * 3);
+    var r2 = 2 * r + 1;
+    // precompute spatial stencil
+    var stencil = new Float32Array(r2 * r2);
+    for (var dy = -r; dy <= r; ++dy)
+    for (var dx = -r; dx <= r; ++dx)
+    {
+        var h = Math.sqrt(dx * dx + dy * dy);
+        var idx = dx + r + r2 * (dy + r);
+        stencil[idx] = Math.exp(-h * h / (2 * sigma * sigma));
+    }
+    // apply filter
+    for (var py = 0; py < height; py++)
+    for (var px = 0; px < width;  px++)
+    {
+        var idx0 = px + width * py;
+        var r_sum = 0;
+        var g_sum = 0;
+        var b_sum = 0;
+        var w_sum = 0;
+        for (var dy = -r; dy <= r; ++dy)
+        for (var dx = -r; dx <= r; ++dx)
+        {
+            var px1 = px + dx;
+            var py1 = py + dy;
+            if (0 <= px1 && 0 <= py1 && px1 < width && py1 < height) {
+                var w = stencil[dx + r + r2 * (dy + r)];
+                var idx1 = px1 + width * py1;
+                var r1 = original[4 * idx1];
+                var g1 = original[4 * idx1 + 1];
+                var b1 = original[4 * idx1 + 2];
+                r_sum += w * r1;
+                g_sum += w * g1;
+                b_sum += w * b1;
+                w_sum += w;
+            }
+        }
+        smoothed[4 * idx0    ] = r_sum / w_sum;
+        smoothed[4 * idx0 + 1] = g_sum / w_sum;
+        smoothed[4 * idx0 + 2] = b_sum / w_sum;
+        smoothed[4 * idx0 + 3] = 255;
+    }
+};
+function smooth_bilateral(width, height, original, smoothed, sigma_space, sigma_range) {
+    var r = Math.ceil(sigma_space * 3);
+    var r2 = 2 * r + 1;
+    // precompute spatial stencil
+    var stencil = new Float32Array(r2 * r2);
+    for (var dy = -r; dy <= r; ++dy)
+    for (var dx = -r; dx <= r; ++dx)
+    {
+        var h = Math.sqrt(dx * dx + dy * dy);
+        var idx = dx + r + r2 * (dy + r);
+        stencil[idx] = Math.exp(-h * h / (2 * sigma_space * sigma_space));
+    }
+    // apply filter
+    for (var py = 0; py < height; py++)
+    for (var px = 0; px < width;  px++)
+    {
+        var idx0 = px + width * py;
+        var r_sum = 0;
+        var g_sum = 0;
+        var b_sum = 0;
+        var w_sum = 0;
+        var r0 = original[4 * idx0];
+        var g0 = original[4 * idx0 + 1];
+        var b0 = original[4 * idx0 + 2];
+        for (var dy = -r; dy <= r; ++dy)
+        for (var dx = -r; dx <= r; ++dx)
+        {
+            var px1 = px + dx;
+            var py1 = py + dy;
+            if (0 <= px1 && 0 <= py1 && px1 < width && py1 < height) {
+                var w_space = stencil[dx + r + r2 * (dy + r)];
+                var idx1 = px1 + width * py1;
+                var r1 = original[4 * idx1];
+                var g1 = original[4 * idx1 + 1];
+                var b1 = original[4 * idx1 + 2];
+                var dr = r1 - r0;
+                var dg = g1 - g0;
+                var db = b1 - b0;
+                var h = dr * dr + dg * dg + db * db;
+                var w_range = Math.exp(- h / (2 * sigma_range * sigma_range));
+                var w = w_space * w_range;
+                r_sum += w * r1;
+                g_sum += w * g1;
+                b_sum += w * b1;
+                w_sum += w;
+            }
+        }
+        smoothed[4 * idx0    ] = r_sum / w_sum;
+        smoothed[4 * idx0 + 1] = g_sum / w_sum;
+        smoothed[4 * idx0 + 2] = b_sum / w_sum;
+        smoothed[4 * idx0 + 3] = 255;
+    }
+};
+// biliteral filter with grid
+function smooth_bilateral_grid(width, height, original, smoothed, sigma_space, sigma_range) {
+    var r = 1;
+    var r2 = 2 * r + 1;
+    // precompute spatial stencil
+    var stencil = new Float32Array(r2 * r2 * r2);
+    for (var di = -r; di <= r; ++di)
+    for (var dy = -r; dy <= r; ++dy)
+    for (var dx = -r; dx <= r; ++dx)
+    {
+        var h2 = dx * dx + dy * dy + di * di;
+        var idx = (dx + r) + r2 * (dy + r) + r2 * r2 * (di + r);
+        stencil[idx] = Math.exp(- h2 / 2);
+    }
+    // create grid
+    var X = Math.ceil(width / sigma_space) + 1;
+    var Y = Math.ceil(height / sigma_space) + 1;
+    var I = Math.ceil(255 / sigma_range) + 1;
+    var grid = new Float32Array(3 * X * Y * I).fill(0), count = new Float32Array(X * Y * I).fill(0);
+    var smoothed_grid = new Float32Array(3 * X * Y * I).fill(0);
+    for (var py = 0; py < height; py++)
+    for (var px = 0; px < width;  px++)
+    {
+        var idx0 = px + width * py;
+        var x = Math.round(px / sigma_space);
+        var y = Math.round(py / sigma_space);
+        var i = Math.round((0.299 * original[4 * idx0] + 0.587 * original[4 * idx0 + 1] + 0.114 * original[4 * idx0 + 2]) / sigma_range);
+        var idx = x + X * y + X * Y * i;
+        grid[3 * idx] += original[4 * idx0];
+        grid[3 * idx + 1] += original[4 * idx0 + 1];
+        grid[3 * idx + 2] += original[4 * idx0 + 2];
+        count[idx] += 1;
+    }
+    // smooth grid
+    for (var gx = 0; gx < X; gx++)
+    for (var gy = 0; gy < Y; gy++)
+    for (var gi = 0; gi < I; gi++)
+    {
+        var idx = gx + X * gy + X * Y * gi;
+        var r_sum = 0;
+        var g_sum = 0;
+        var b_sum = 0;
+        var w_sum = 0;
+        for (var di = -r; di <= r; ++di)
+        for (var dy = -r; dy <= r; ++dy)
+        for (var dx = -r; dx <= r; ++dx)
+        {
+            if (0 <= gx+dx && gx+dx < X && 0 <= gy+dx && gy+dy < Y && 0 <= gi+di && gi+di < I) {
+                var idx_s = (dx + r) + r2 * (dy + r) + r2 * r2 * (di + r);
+                var weight = stencil[idx_s];
+                var idx_g = idx + dx + X * dy + X * Y * di;
+                r_sum += weight * grid[3 * idx_g];
+                g_sum += weight * grid[3 * idx_g + 1];
+                b_sum += weight * grid[3 * idx_g + 2];
+                w_sum += weight * count[idx_g];
+            }
+        }
+        if (w_sum != 0) {
+            smoothed_grid[3 * idx] = r_sum / w_sum;
+            smoothed_grid[3 * idx + 1] = g_sum / w_sum;
+            smoothed_grid[3 * idx + 2] = b_sum / w_sum;
+        }
+    }
+    // trilinear interpolation
+    for (var py = 0; py < height; py++)
+    for (var px = 0; px < width;  px++)
+    {
+        var idx0 = px + width * py;
+        var x = px / sigma_space;
+        var y = py / sigma_space;
+        var i = (0.299 * original[4 * idx0] + 0.587 * original[4 * idx0 + 1] + 0.114 * original[4 * idx0 + 2]) / sigma_range;
+        var cx = x - Math.floor(x), cy = y - Math.floor(y), ci = i - Math.floor(i);
+        
+        var idx000 = Math.floor(x)+X*Math.floor(y)+X*Y*Math.floor(i), idx001 = Math.floor(x)+X*Math.floor(y)+ X*Y*Math.ceil(i);
+        var idx010 = Math.floor(x)+ X*Math.ceil(y)+X*Y*Math.floor(i), idx011 = Math.floor(x)+ X*Math.ceil(y)+ X*Y*Math.ceil(i);
+        var idx100 =  Math.ceil(x)+X*Math.floor(y)+X*Y*Math.floor(i), idx101 =  Math.ceil(x)+X*Math.floor(y)+X*Y*Math.ceil(i);
+        var idx110 =  Math.ceil(x)+ X*Math.ceil(y)+X*Y*Math.floor(i), idx111 =  Math.ceil(x)+X*Math.ceil(y)+X*Y*Math.ceil(i);
+        var r000 = smoothed_grid[3*idx000], r001 = smoothed_grid[3*idx001], r010 = smoothed_grid[3*idx010], r011 = smoothed_grid[3*idx011];
+        var r100 = smoothed_grid[3*idx100], r101 = smoothed_grid[3*idx101], r110 = smoothed_grid[3*idx110], r111 = smoothed_grid[3*idx111];
+        var g000 = smoothed_grid[3*idx000+1], g001 = smoothed_grid[3*idx001+1], g010 = smoothed_grid[3*idx010+1], g011 = smoothed_grid[3*idx011+1];
+        var g100 = smoothed_grid[3*idx100+1], g101 = smoothed_grid[3*idx101+1], g110 = smoothed_grid[3*idx110+1], g111 = smoothed_grid[3*idx111+1];
+        var b000 = smoothed_grid[3*idx000+2], b001 = smoothed_grid[3*idx001+2], b010 = smoothed_grid[3*idx010+2], b011 = smoothed_grid[3*idx011+2];
+        var b100 = smoothed_grid[3*idx100+2], b101 = smoothed_grid[3*idx101+2], b110 = smoothed_grid[3*idx110+2], b111 = smoothed_grid[3*idx111+2];
+        var r00 = r000*(1-cx)+r100*cx, r01 = r001*(1-cx)+r101*cx, r10 = r010*(1-cx)+r110*cx, r11 = r011*(1-cx)+r111*cx;
+        var g00 = g000*(1-cx)+g100*cx, g01 = g001*(1-cx)+g101*cx, g10 = g010*(1-cx)+g110*cx, g11 = g011*(1-cx)+g111*cx;
+        var b00 = b000*(1-cx)+b100*cx, b01 = b001*(1-cx)+b101*cx, b10 = b010*(1-cx)+b110*cx, b11 = b011*(1-cx)+b111*cx;
+        var r0 = r00*(1-cy)+r10*cy, r1 = r01*(1-cy)+r11*cy;
+        var g0 = g00*(1-cy)+g10*cy, g1 = g01*(1-cy)+g11*cy;
+        var b0 = b00*(1-cy)+b10*cy, b1 = b01*(1-cy)+b11*cy;
+        var r_value = r0*(1-ci)+r1*ci;
+        var g_value = g0*(1-ci)+g1*ci;
+        var b_value = b0*(1-ci)+b1*ci;
+        smoothed[4 * idx0    ] = r_value;
+        smoothed[4 * idx0 + 1] = g_value;
+        smoothed[4 * idx0 + 2] = b_value;
+        smoothed[4 * idx0 + 3] = 255;
+    }
+}
+function sobel(width, height, original, smoothed, edge_range) {
+    var r = 1;
+    var r2 = 2 * r + 1;
+    var filter_x = [-1, 0, 1,
+                    -2, 0, 2,
+                    -1, 0, 1];
+    var filter_y = [-1, -2, -1,
+                     0,  0,  0,
+                     1,  2,  1];
+    // apply filter
+    for (var py = 0; py < height; py++)
+    for (var px = 0; px < width;  px++)
+    {
+        var idx0 = px + width * py;
+        var sumrx = 0, sumry = 0;
+        var sumgx = 0, sumgy = 0;
+        var sumbx = 0, sumby = 0;
+        for (var dy = -r; dy <= r; ++dy)
+        for (var dx = -r; dx <= r; ++dx)
+        {
+            var px1 = px + dx;
+            var py1 = py + dy;
+            if (0 <= px1 && 0 <= py1 && px1 < width && py1 < height) {
+                var wx = filter_x[dx + r + r2 * (dy + r)];
+                var wy = filter_y[dx + r + r2 * (dy + r)];
+                var idx1 = px1 + width * py1;
+                var r1 = original[4 * idx1];
+                var g1 = original[4 * idx1 + 1];
+                var b1 = original[4 * idx1 + 2];
+                sumrx += wx * r1;
+                sumry += wy * r1;
+                sumgx += wx * g1;
+                sumgy += wy * g1;
+                sumbx += wx * b1;
+                sumby += wy * b1;
+            }
+        }
+        if (Math.abs(sumrx) > edge_range || Math.abs(sumry) > edge_range || Math.abs(sumgx) > edge_range || Math.abs(sumgy) > edge_range || Math.abs(sumbx) > edge_range || Math.abs(sumby) > edge_range) {
+            smoothed[4 * idx0    ] = 255;
+            smoothed[4 * idx0 + 1] = 255;
+            smoothed[4 * idx0 + 2] = 255;
+            smoothed[4 * idx0 + 3] = 255;
+        } else {
+            smoothed[4 * idx0    ] = 0;
+            smoothed[4 * idx0 + 1] = 0;
+            smoothed[4 * idx0 + 2] = 0;
+            smoothed[4 * idx0 + 3] = 255;
+        }
+    }
+}
+function subtract(width, height, original, smoothed, detail) {
+    for (var i = 0; i < width * height; ++i) {
+        for (var j = 0; j < 3; ++j) {
+            var ij = 4 * i + j;
+            detail[ij] = 128 + original[ij] - smoothed[ij];
+        }
+        detail[4 * i + 3] = 255;
+    }
+};
+function enhance_detail(width, height, smoothed, detail, scaling, enhanced) {
+    for (var i = 0; i < width * height; ++i) {
+        for (var j = 0; j < 3; ++j) {
+            var ij = 4 * i + j;
+            enhanced[ij] = Math.min(255, Math.max(0, smoothed[ij] + scaling * (detail[ij] - 128)));
+        }
+        enhanced[4 * i + 3] = 255;
+    }
+};
+function stylize(width, height, smoothed, edge, stylized) {
+    for (var i = 0; i < width * height; ++i) {
+        for (var j = 0; j < 3; ++j) {
+            var ij = 4 * i + j;
+            stylized[ij] = Math.min(255, Math.max(0, smoothed[ij] - edge[ij]));
+        }
+        stylized[4 * i + 3] = 255;
+    }
+}
+function init() {
+    document.getElementById("img_original").onload = function(){
+        canvas.width  = this.width;
+        canvas.height = this.height;
+        document.getElementById("img_smoothed").width  = this.width;
+        document.getElementById("img_smoothed").height = this.height;
+        document.getElementById("img_detail"  ).width  = this.width;
+        document.getElementById("img_detail"  ).height = this.height;
+        document.getElementById("img_enhanced").width  = this.width;
+        document.getElementById("img_enhanced").height = this.height;
+    };
+    document.getElementById("input_file_original").onchange = function(evt) {
+        var reader = new FileReader();
+        reader.readAsDataURL(evt.target.files[0]);
+        reader.onload = function(){
+            document.getElementById("img_original").src = this.result;
+        };
+    };
+    document.getElementById("btn_do_smoothing").onclick = function() {
+        var width = canvas.width;
+        var height = canvas.height;
+        // read original
+        context.drawImage(document.getElementById("img_original"), 0, 0);
+        var original = context.getImageData(0, 0, width, height);
+        // do smoothing
+        var smoothed = context.createImageData(width, height);
+        var sigma_space = Number(document.getElementById("input_num_sigma_space").value);
+        var sigma_range = Number(document.getElementById("input_num_sigma_range").value);
+        if (document.getElementById("input_chk_use_bilateral").checked) {
+            smooth_bilateral(width, height, original.data, smoothed.data, sigma_space, sigma_range);
+        } else if (document.getElementById("input_chk_use_bilateral_grid").checked) {
+            smooth_bilateral_grid(width, height, original.data, smoothed.data, sigma_space, sigma_range);
+        } else {
+            smooth_gaussian(width, height, original.data, smoothed.data, sigma_space);
+        }
+        context.putImageData(smoothed, 0, 0);
+        document.getElementById("img_smoothed").src = canvas.toDataURL();
+        // detail = original - smoothed
+        var detail = context.createImageData(width, height);
+        subtract(width, height, original.data, smoothed.data, detail.data);
+        context.putImageData(detail, 0, 0);
+        document.getElementById("img_detail").src = canvas.toDataURL();
+    };
+    document.getElementById("btn_enhance_detail").onclick = function() {
+        var width = canvas.width;
+        var height = canvas.height;
+        // read smoothed and detail
+        context.drawImage(document.getElementById("img_smoothed"), 0, 0);
+        var smoothed = context.getImageData(0, 0, width, height);
+        context.drawImage(document.getElementById("img_detail"), 0, 0);
+        var detail = context.getImageData(0, 0, width, height);
+        // enhanced = smoothed + scale * detail
+        var enhanced = context.createImageData(width, height);
+        var detail_scaling = Number(document.getElementById("input_num_detail_scaling").value);
+        if (document.getElementById("input_chk_enhance").checked) {
+            enhance_detail(width, height, smoothed.data, detail.data, detail_scaling, enhanced.data);
+        } else {
+            var sigma_space = Number(document.getElementById("input_num_sigma_space").value);
+            var sigma_range = Number(document.getElementById("input_num_sigma_range").value);
+            var num_iterations = Number(document.getElementById("input_num_iterations").value);
+            for (var i = 0; i < num_iterations; i++) {
+                if (document.getElementById("input_chk_use_bilateral").checked) {
+                    smooth_bilateral(width, height, smoothed.data, smoothed.data, sigma_space, sigma_range);
+                } else if (document.getElementById("input_chk_use_bilateral_grid").checked) {
+                    smooth_bilateral_grid(width, height, smoothed.data, smoothed.data, sigma_space, sigma_range);
+                }
+            }
+            var edge = context.createImageData(width, height);
+            var edge_range = Number(document.getElementById("input_num_edge_range").value);
+            sobel(width, height, smoothed.data, edge.data, edge_range);
+            stylize(width, height, smoothed.data, edge.data, enhanced.data);
+        }
+        context.putImageData(enhanced, 0, 0);
+        document.getElementById("img_enhanced").src = canvas.toDataURL();
+    };
+    document.getElementById("img_original").src = "https://cdn.glitch.com/1214143e-0c44-41fb-b1ad-e9aa3347cdaa%2Frock.png?v=1562148154890";
+    document.getElementById("input_chk_use_bilateral_grid").onclick = function() {
+        if (document.getElementById("input_chk_use_bilateral_grid").checked) {
+            document.getElementById("input_chk_use_bilateral").checked = false;
+        }
+    };
+    document.getElementById("input_chk_use_bilateral").onclick = function() {
+        if (document.getElementById("input_chk_use_bilateral").checked) {
+            document.getElementById("input_chk_use_bilateral_grid").checked = false;
+        }
+    };
+    document.getElementById("input_chk_enhance").onclick = function() {
+        if (document.getElementById("input_chk_enhance").checked) {
+            document.getElementById("input_chk_stylize").checked = false;
+        }
+        document.getElementById("input_chk_enhance").checked = true;
+    };
+    document.getElementById("input_chk_stylize").onclick = function() {
+        if (document.getElementById("input_chk_stylize").checked) {
+            document.getElementById("input_chk_enhance").checked = false;
+        }
+        document.getElementById("input_chk_stylize").checked = true;
+    };
+};
+</script>
+</head>
+<body onload="init()">
+  <h2><a target="_blank" href="http://research.nii.ac.jp/~takayama/teaching/utokyo-iscg-2020/"><script type="text/javascript">document.write(document.getElementById("title").innerHTML);</script></a></h2>
+  <table><tr valign="top">
+    <td align="center"><img id="img_original" crossorigin="anonymous"><br>Original</td>
+    <td align="center"><img id="img_smoothed"><br>Smoothed</td>
+    <td align="center"><img id="img_detail"><br>Detail<br>= Original - Smoothed</td>
+    <td align="center"><img id="img_enhanced"><br>Enhanced<br>= Smoothed + s * Detail</td>
+  </tr></table>
+  <ul>
+    <li>Load Image: <input type="file" id="input_file_original" accept="image/*"></li>
+    <li>Sigma_Space: <input type="number" id="input_num_sigma_space" step="1" min="1" value="5"></li>
+    <li>Sigma_Range: <input type="number" id="input_num_sigma_range" step="1" min="1" value="25"></li>
+    <li><input type="checkbox" id="input_chk_use_bilateral" checked> Use Bilateral</li>
+    <li><input type="checkbox" id="input_chk_use_bilateral_grid">Use Bilateral (with GRID)</li>
+    <li><button id="btn_do_smoothing">Do Smoothing</button></li>
+    <li>Detail Scaling: <input type="number" id="input_num_detail_scaling" step="0.1" min="0" value="2"></li>
+    <li>Num Iterations: <input type="number" id="input_num_iterations" step="1" min="0" max="10" value="0"></li>
+    <li>Edge Range: <input type="number" id="input_num_edge_range" step="1" min="0" max="1000" value="150"></li>
+    <li><input type="checkbox" id="input_chk_enhance" checked>Enhance</li>
+    <li><input type="checkbox" id="input_chk_stylize">Stylize</li>
+    <li><button id="btn_enhance_detail">Process</button></li>
+  </ul>
+  
+  <div class="glitchButton" style="position:fixed;top:20px;right:20px;"></div>
+  <script src="https://button.glitch.me/button.js"></script>
+</body>
+</html>
